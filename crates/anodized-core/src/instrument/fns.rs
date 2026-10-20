@@ -189,12 +189,19 @@ impl Mode {
             ::anodized::__::eval_once(|| { __anodized_output })
         };
         emit_input_bindings(inputs.clone(), &mut stmts);
-        emit_captures_and_output_binding(inputs.clone(), captures, output_eval, &mut stmts);
+        let capture_reads = emit_captures_and_output_binding(
+            inputs.clone(),
+            captures,
+            output_eval,
+            true,
+            &mut stmts,
+        );
         emit_postcondition_checks(
             inputs,
             output_spec,
             maintains,
             ensures,
+            &capture_reads,
             &mut stmts,
             |eval, _, _, _| eval.clone(),
         );
@@ -290,7 +297,13 @@ impl CheckSettings {
                 ::anodized::__::eval_once(|| #return_type #body)
             }
         };
-        emit_captures_and_output_binding(inputs.clone(), &spec.captures, output_eval, &mut stmts);
+        let capture_reads = emit_captures_and_output_binding(
+            inputs.clone(),
+            &spec.captures,
+            output_eval,
+            self.evaluates(),
+            &mut stmts,
+        );
 
         // Generate postcondition checks.
         emit_postcondition_checks(
@@ -298,6 +311,7 @@ impl CheckSettings {
             spec.output_spec_flag.then_some(return_type),
             &spec.maintains,
             &spec.ensures,
+            &capture_reads,
             &mut stmts,
             |eval, cfg, msg, repr| self.instrument_cond_eval(eval, cfg, msg, repr),
         );
@@ -317,6 +331,12 @@ impl CheckSettings {
         Ok(())
     }
 
+    /// Whether any condition of this build can be evaluated: only printing
+    /// or panicking on a failure evaluates one.
+    fn evaluates(&self) -> bool {
+        self.does_print || self.does_panic.is_some()
+    }
+
     fn instrument_cond_eval(
         &self,
         cond: &Expr,
@@ -326,7 +346,7 @@ impl CheckSettings {
     ) -> Expr {
         let span = cond.span();
 
-        let guard: Option<Expr> = if self.does_print || self.does_panic.is_some() {
+        let guard: Option<Expr> = if self.evaluates() {
             cfg.as_ref().map(|meta| parse_quote! { !cfg!(#meta) })
         } else {
             Some(parse_quote! { true })
@@ -458,19 +478,44 @@ fn emit_input_bindings<'a, 'b>(
     }
 }
 
+/// Bind the captures, the output and the `inout` inputs, and return the
+/// statements a condition's closure starts with to read the captures.
+///
+/// When `evaluated`, each capture is evaluated before the body and bound
+/// beside the output, and nothing is returned. Otherwise no condition is ever
+/// evaluated, so neither is a capture: each capture's expression is only
+/// typed, before the body as when evaluated, and every condition binds the
+/// capture's pattern to a stand-in of that type that is never read.
 fn emit_captures_and_output_binding<'a, 'b>(
     inputs: impl Iterator<Item = (&'a FnArg, &'b InputSpecFlags)>,
     captures: &[Capture],
     output_eval: Expr,
+    evaluated: bool,
     statements: &mut Vec<Stmt>,
-) {
+) -> Vec<Stmt> {
     let mut patterns = vec![];
     let mut values = vec![];
+    let mut capture_reads = vec![];
 
-    for capture in captures {
-        patterns.push(capture.pat.clone());
-        let capture_eval = build_capture_eval(&capture.expr);
-        values.push(capture_eval);
+    for (i, capture) in captures.iter().enumerate() {
+        if evaluated {
+            patterns.push(capture.pat.clone());
+            values.push(build_capture_eval(&capture.expr));
+        } else {
+            let ident = Ident::new(
+                &format!("__anodized_capture_{}", i + 1),
+                capture.expr.span(),
+            );
+            let expr = &capture.expr;
+            let pat = &capture.pat;
+            statements.push(parse_quote! {
+                let #ident = ::anodized::__::unevaluated(|| #expr);
+            });
+            capture_reads.push(parse_quote! {
+                #[allow(unused)]
+                let #pat = ::anodized::__::read_unevaluated(#ident);
+            });
+        }
     }
 
     let output_ident = Pat::Path(parse_quote! { __anodized_output });
@@ -495,6 +540,7 @@ fn emit_captures_and_output_binding<'a, 'b>(
     };
 
     statements.push(binding);
+    capture_reads
 }
 
 fn emit_postcondition_checks<'a, 'b>(
@@ -502,6 +548,7 @@ fn emit_postcondition_checks<'a, 'b>(
     output_spec: Option<&ReturnType>,
     maintains: &[Condition],
     ensures: &[PostCondition],
+    capture_reads: &[Stmt],
     statements: &mut Vec<Stmt>,
     instrument_eval: impl FnInstrumentEval,
 ) {
@@ -567,7 +614,7 @@ fn emit_postcondition_checks<'a, 'b>(
     }
 
     for postinvariant in maintains {
-        let eval = build_cond_eval(&postinvariant.expr);
+        let eval = build_cond_eval_reading(&postinvariant.expr, capture_reads);
         let instrumented_eval = instrument_eval(
             &eval,
             &postinvariant.cfg,
@@ -579,7 +626,7 @@ fn emit_postcondition_checks<'a, 'b>(
     }
 
     for postcondition in ensures {
-        let eval = build_cond_eval(&postcondition.expr);
+        let eval = build_cond_eval_reading(&postcondition.expr, capture_reads);
         let instrumented_eval = instrument_eval(
             &eval,
             &postcondition.cfg,
@@ -594,6 +641,18 @@ fn emit_postcondition_checks<'a, 'b>(
 fn build_cond_eval(expr: &Expr) -> Expr {
     let span = expr.span();
     parse_quote_spanned! { span => ::anodized::__::eval::<bool>(|| #expr) }
+}
+
+/// As [`build_cond_eval`], with the condition's closure first binding the
+/// captures through `capture_reads` when they are not evaluated.
+fn build_cond_eval_reading(expr: &Expr, capture_reads: &[Stmt]) -> Expr {
+    if capture_reads.is_empty() {
+        return build_cond_eval(expr);
+    }
+    let span = expr.span();
+    parse_quote_spanned! { span =>
+        ::anodized::__::eval::<bool>(|| { #(#capture_reads)* #expr })
+    }
 }
 
 fn build_capture_eval(expr: &Expr) -> Expr {

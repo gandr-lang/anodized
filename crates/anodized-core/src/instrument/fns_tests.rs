@@ -134,6 +134,14 @@ fn embed_spec_charon_item_fn() {
 fn default_instrument_item_fn() {
     let spec_item_fn = make_complex_spec_item_fn();
 
+    // No condition is evaluated, so the captures are only typed before the
+    // body, and each postcondition reads them through stand-ins.
+    let reads = quote::quote! {
+        #[allow(unused)]
+        let ALIAS_1 = ::anodized::__::read_unevaluated(__anodized_capture_1);
+        #[allow(unused)]
+        let (ALIAS_2, ALIAS_3) = ::anodized::__::read_unevaluated(__anodized_capture_2);
+    };
     let expected: TokenStream = parse_quote! {
         fn FUNC(&self, PARAM_1: TYPE_1, PARAM_2: TYPE_2) -> RET_TYPE {
             let __anodized_pre = true;
@@ -144,25 +152,23 @@ fn default_instrument_item_fn() {
             let __anodized_pre = __anodized_pre & (true || ::anodized::__::eval::<bool>(|| COND_5));
             let __anodized_pre = __anodized_pre & (true || ::anodized::__::eval::<bool>(|| COND_6));
             if !__anodized_pre {}
-            let (ALIAS_1, (ALIAS_2, ALIAS_3), __anodized_output) = (
-                ::anodized::__::eval(|| EXPR_1),
-                ::anodized::__::eval(|| EXPR_2),
-                ::anodized::__::eval_once(|| -> RET_TYPE { BODY }),
-            );
+            let __anodized_capture_1 = ::anodized::__::unevaluated(|| EXPR_1);
+            let __anodized_capture_2 = ::anodized::__::unevaluated(|| EXPR_2);
+            let __anodized_output = ::anodized::__::eval_once(|| -> RET_TYPE { BODY });
             let __anodized_post = true;
-            let __anodized_post = __anodized_post & (true || ::anodized::__::eval::<bool>(|| COND_4));
-            let __anodized_post = __anodized_post & (true || ::anodized::__::eval::<bool>(|| COND_5));
-            let __anodized_post = __anodized_post & (true || ::anodized::__::eval::<bool>(|| COND_6));
+            let __anodized_post = __anodized_post & (true || ::anodized::__::eval::<bool>(|| { #reads COND_4 }));
+            let __anodized_post = __anodized_post & (true || ::anodized::__::eval::<bool>(|| { #reads COND_5 }));
+            let __anodized_post = __anodized_post & (true || ::anodized::__::eval::<bool>(|| { #reads COND_6 }));
             let (__anodized_post, __anodized_output) = ::anodized::__::apply_keep(
-                |PAT_1| (__anodized_post & (true || ::anodized::__::eval::<bool>(|| COND_7)), PAT_1),
+                |PAT_1| (__anodized_post & (true || ::anodized::__::eval::<bool>(|| { #reads COND_7 })), PAT_1),
                 __anodized_output,
             );
             let (__anodized_post, __anodized_output) = ::anodized::__::apply_keep(
-                |PAT_1| (__anodized_post & (true || ::anodized::__::eval::<bool>(|| COND_8)), PAT_1),
+                |PAT_1| (__anodized_post & (true || ::anodized::__::eval::<bool>(|| { #reads COND_8 })), PAT_1),
                 __anodized_output,
             );
             let (__anodized_post, __anodized_output) = ::anodized::__::apply_keep(
-                |PAT_1| (__anodized_post & (true || ::anodized::__::eval::<bool>(|| COND_9)), PAT_1),
+                |PAT_1| (__anodized_post & (true || ::anodized::__::eval::<bool>(|| { #reads COND_9 })), PAT_1),
                 __anodized_output,
             );
             if !__anodized_post {}
