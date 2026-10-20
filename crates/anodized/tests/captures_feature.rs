@@ -252,3 +252,46 @@ fn match_struct_success() {
 fn capture_as_array_success() {
     capture_as_array(10, 20, 30);
 }
+
+// A capture feeds only conditions, so a build that evaluates no condition
+// (neither `anodized_panic` nor `anodized_print`) evaluates no capture either.
+thread_local! {
+    static CAPTURE_EVALUATIONS: core::cell::Cell<u32> = const { core::cell::Cell::new(0) };
+}
+
+fn observed(value: u32) -> u32 {
+    CAPTURE_EVALUATIONS.with(|count| count.set(count.get() + 1));
+    value
+}
+
+#[spec(
+    captures: [before = observed(x)],
+    ensures: |ret| ret == before + 1,
+)]
+fn observed_successor(x: u32) -> u32 {
+    x + 1
+}
+
+// The capture is of an input the body consumes, and destructures.
+#[spec(
+    captures: [len = observed(v.len() as u32), (first, last) = (v.first().copied(), v.last().copied())],
+    ensures: |ret| ret == len && (len == 0 || first.is_some() && last.is_some()),
+)]
+fn consumed_length(v: Vec<u32>) -> u32 {
+    let len = v.len() as u32;
+    drop(v);
+    len
+}
+
+#[test]
+fn captures_are_evaluated_only_where_conditions_are() {
+    CAPTURE_EVALUATIONS.with(|count| count.set(0));
+    assert_eq!(observed_successor(1), 2);
+    assert_eq!(consumed_length(vec![1, 2, 3]), 3);
+    let expected = if cfg!(any(anodized_panic, anodized_print)) {
+        2
+    } else {
+        0
+    };
+    assert_eq!(CAPTURE_EVALUATIONS.with(core::cell::Cell::get), expected);
+}
