@@ -255,7 +255,7 @@ fn emit_try_fn_instrument_item_trait() {
         }
     };
 
-    let observed = Mode::InjectChecks(CheckSettings::PRINT_AND_TRY)
+    let observed = Mode::Dynamic(CheckSettings::PRINT_AND_TRY)
         .instrument_item_trait(spec_item_trait.spec, spec_item_trait.node)
         .unwrap();
     assert_tokens_eq(&observed, &expected);
@@ -480,7 +480,7 @@ fn emit_try_fn_instrument_item_impl_trait() {
         }
     };
 
-    let observed = Mode::InjectChecks(CheckSettings::PRINT_AND_TRY)
+    let observed = Mode::Dynamic(CheckSettings::PRINT_AND_TRY)
         .instrument_item_trait_impl(spec_item_impl.spec, spec_item_impl.node)
         .unwrap();
     assert_tokens_eq(&observed, &expected);

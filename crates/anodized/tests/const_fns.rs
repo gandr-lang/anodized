@@ -1,5 +1,5 @@
 //! Constant evaluation and runtime checks share the same specified functions.
-#![cfg(not(any(anodized_print, anodized_try, anodized_embed_specs)))]
+#![cfg(not(any(anodized_print, anodized_try, anodized_embed_specs, anodized_charon)))]
 
 use anodized::spec;
 

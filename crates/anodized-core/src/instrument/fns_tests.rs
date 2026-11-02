@@ -248,7 +248,7 @@ fn type_spec_enforcement_instrument_item_fn() {
         }
     };
 
-    let observed = Mode::InjectChecks(CheckSettings::DEFAULT)
+    let observed = Mode::Dynamic(CheckSettings::DEFAULT)
         .instrument_item_fn(spec_item_fn.spec, spec_item_fn.node)
         .unwrap();
     assert_tokens_eq(&observed, &expected);
@@ -285,7 +285,7 @@ fn type_spec_enforcement_spec_marker_input_out() {
         }
     };
 
-    let observed = Mode::InjectChecks(CheckSettings::DEFAULT)
+    let observed = Mode::Dynamic(CheckSettings::DEFAULT)
         .instrument_item_fn(spec_item_fn.spec, spec_item_fn.node)
         .unwrap();
     assert_tokens_eq(&observed, &expected);
@@ -318,7 +318,7 @@ fn type_spec_enforcement_spec_marker_input() {
         }
     };
 
-    let observed = Mode::InjectChecks(CheckSettings::DEFAULT)
+    let observed = Mode::Dynamic(CheckSettings::DEFAULT)
         .instrument_item_fn(spec_item_fn.spec, spec_item_fn.node)
         .unwrap();
     assert_tokens_eq(&observed, &expected);
@@ -346,7 +346,7 @@ fn type_spec_enforcement_unmarked_input() {
         }
     };
 
-    let observed = Mode::InjectChecks(CheckSettings::DEFAULT)
+    let observed = Mode::Dynamic(CheckSettings::DEFAULT)
         .instrument_item_fn(spec_item_fn.spec, spec_item_fn.node)
         .unwrap();
     assert_tokens_eq(&observed, &expected);
@@ -372,7 +372,7 @@ fn type_spec_enforcement_unmarked_output() {
         }
     };
 
-    let observed = Mode::InjectChecks(CheckSettings::DEFAULT)
+    let observed = Mode::Dynamic(CheckSettings::DEFAULT)
         .instrument_item_fn(spec_item_fn.spec, spec_item_fn.node)
         .unwrap();
     assert_tokens_eq(&observed, &expected);
@@ -450,7 +450,7 @@ fn emit_try_fn_instrument_item_fn() {
         }
     };
 
-    let observed = Mode::InjectChecks(CheckSettings::PRINT_AND_TRY)
+    let observed = Mode::Dynamic(CheckSettings::PRINT_AND_TRY)
         .instrument_item_fn(spec_item_fn.spec, spec_item_fn.node)
         .unwrap();
     assert_tokens_eq(&observed, &expected);
@@ -1372,7 +1372,7 @@ fn const_requires_panic_is_direct() {
             __anodized_output
         }
     };
-    let mode = Mode::InjectChecks(CheckSettings {
+    let mode = Mode::Dynamic(CheckSettings {
         does_print: false,
         does_panic: Some(crate::instrument::PanicSettings { has_try_fn: false }),
     });
@@ -1417,7 +1417,7 @@ fn const_maintains_checks_both_boundaries() {
             __anodized_output
         }
     };
-    let mode = Mode::InjectChecks(CheckSettings {
+    let mode = Mode::Dynamic(CheckSettings {
         does_print: false,
         does_panic: Some(crate::instrument::PanicSettings { has_try_fn: false }),
     });
@@ -1431,7 +1431,7 @@ fn const_print_is_refused() {
         #[spec(requires: value > 0)]
         const fn positive(value: u32) -> u32 { value }
     };
-    let error = Mode::InjectChecks(CheckSettings::PRINT)
+    let error = Mode::Dynamic(CheckSettings::PRINT)
         .instrument_item_fn(input.spec, input.node)
         .unwrap_err();
     assert_eq!(
