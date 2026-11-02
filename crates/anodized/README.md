@@ -34,7 +34,7 @@ Anodized specs are not comments but attributes, so they are checked by the Rust 
 
 ```toml
 [dependencies]
-anodized = "0.7.0"
+anodized = "0.8.0"
 ```
 
 For `no_std` targets, set `default-features = false` to disable the default `logic` feature and its `anodized::logic` and `anodized::arithmetic` exports. Spec expressions must be compatible with the target; `anodized_print` requires `std`.
@@ -87,17 +87,24 @@ fn percentage_10_over_0() {
 }
 ```
 
-Use the `anodized_panic` setting to instrument the code with runtime checks.
+Use the `anodized_panic` setting to instrument the code with runtime checks. Add
+`anodized_print` to have the failing condition named as well.
 
 ```bash
-RUSTFLAGS="--cfg anodized_panic" cargo test
+RUSTFLAGS="--cfg anodized_print --cfg anodized_panic" cargo test
 ```
 
-A spec violation will cause a panic with a descriptive error message:
+A spec violation reports the condition, then panics:
 
 ```text
-thread 'main' panicked at 'Precondition failed: part <= whole', src/main.rs:17:5
+precondition failed: part <= whole
+precondition failed: whole > 0.0
+thread 'main' panicked at src/main.rs:3:1:
+precondition failed
 ```
+
+Conditions are checked independently rather than short-circuiting, so every violated one is
+reported before the panic.
 
 For more details and other approaches, see [The Anodized Reference](https://github.com/anodized-rs/anodized/blob/main/crates/anodized/REFERENCE.md).
 

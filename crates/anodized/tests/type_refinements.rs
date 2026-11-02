@@ -1,4 +1,4 @@
-#![cfg(not(anodized_discard_specs))]
+#![cfg(not(any(anodized_discard_specs, anodized_hax)))]
 #![cfg_attr(anodized_charon, feature(register_tool))]
 #![cfg_attr(anodized_charon, register_tool(charon))]
 
@@ -66,7 +66,8 @@ fn core_containers_preserve_refinements() {
 fn allocated_containers_preserve_refinements() {
     for number in [0, 1] {
         let expected = number > 0;
-        assert_eq!(Box::new(Positive(number)).predicate(), expected);
+        let boxed = Box::new(Positive(number));
+        assert_eq!(boxed.predicate(), expected);
         assert_eq!(vec![Positive(1), Positive(number)].predicate(), expected);
     }
     assert!(Vec::<Positive>::new().predicate());
