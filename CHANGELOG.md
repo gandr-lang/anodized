@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **[anodized-core] Qualifier constant names** - Generated qualifier metadata and its references use uppercase identifiers, so consumers can deny `nonstandard-style` without allowing generated constant names.
 - **[anodized-core] Trait wrapper inline hints** - Generated trait wrappers, inherited default bodies, and embedded predicate helpers carry inline hints without overriding authored inline attributes, so consumers can deny missing inline hints.
 - **[anodized] Core-only type refinements** - `types::Spec`, its marker macro, and non-allocating container implementations work without `logic`, including type-spec enforcement at function and field boundaries.
+- **[anodized] Inlined runtime helpers** - The helpers every instrumented function calls (`eval_once`, `eval`, `apply_keep`, `coerce_input`, `unevaluated`) are always inlined, so a build at `opt-level = "s"` no longer keeps a small specified function out of line behind a helper call.
 
 ## 0.8.0 (2026 Oct 29)
 
