@@ -37,8 +37,17 @@ pub fn spec(args: TokenStream, input: TokenStream) -> TokenStream {
     // Parse the `#[spec]` attribute's arguments.
     let spec_fields = parse_macro_input!(args as SpecFields);
 
-    // Parse the item to which the attribute is attached.
-    let item = parse_macro_input!(input as Item);
+    // Parse the item to which the attribute is attached. A function whose
+    // body holds no `#[spec]` keeps its body as its tokens: the
+    // instrumentation wraps the body and reads none of it.
+    let input = proc_macro2::TokenStream::from(input);
+    let item = match verbatim_fn(&input) {
+        Some(func) => Item::Fn(func),
+        None => match syn::parse2::<Item>(input) {
+            Ok(item) => item,
+            Err(e) => return e.to_compile_error().into(),
+        },
+    };
 
     let result = match item {
         Item::Fn(mut func) => func
@@ -89,6 +98,77 @@ pub fn spec(args: TokenStream, input: TokenStream) -> TokenStream {
     }
 }
 
+/// The attributes, the visibility and the signature of a function.
+struct FnHead(Vec<syn::Attribute>, syn::Visibility, syn::Signature);
+
+impl syn::parse::Parse for FnHead {
+    fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
+        Ok(Self(
+            input.call(syn::Attribute::parse_outer)?,
+            input.parse()?,
+            input.parse()?,
+        ))
+    }
+}
+
+/// `input` as a function whose body is one verbatim statement, when it is a
+/// function that is not `const` and whose body holds no `#[spec]`.
+fn verbatim_fn(input: &proc_macro2::TokenStream) -> Option<syn::ItemFn> {
+    use proc_macro2::{Delimiter, TokenTree};
+    let mut head: Vec<TokenTree> = input.clone().into_iter().collect();
+    let Some(TokenTree::Group(body)) = head.pop() else {
+        return None;
+    };
+    if body.delimiter() != Delimiter::Brace {
+        return None;
+    }
+    // A `const fn` reads the `return`s of its body, so it takes the whole parse.
+    let keyword = head.iter().find_map(|tree| match tree {
+        TokenTree::Ident(ident) if ident == "fn" || ident == "const" => Some(ident.to_string()),
+        _ => None,
+    })?;
+    if keyword != "fn" || holds_spec(body.stream()) {
+        return None;
+    }
+    let FnHead(attrs, vis, sig) = syn::parse2(head.into_iter().collect()).ok()?;
+    Some(syn::ItemFn {
+        attrs,
+        vis,
+        sig,
+        block: Box::new(syn::Block {
+            brace_token: syn::token::Brace {
+                span: body.delim_span(),
+            },
+            stmts: vec![syn::Stmt::Expr(syn::Expr::Verbatim(body.stream()), None)],
+        }),
+    })
+}
+
+/// Whether `tokens` hold an attribute `#[spec …]` at any depth.
+fn holds_spec(tokens: proc_macro2::TokenStream) -> bool {
+    use proc_macro2::{Delimiter, TokenTree};
+    let mut after_pound = false;
+    for tree in tokens {
+        match tree {
+            TokenTree::Punct(punct) => after_pound = punct.as_char() == '#',
+            TokenTree::Group(group) => {
+                if after_pound
+                    && group.delimiter() == Delimiter::Bracket
+                    && matches!(group.stream().into_iter().next(), Some(TokenTree::Ident(ident)) if ident == "spec")
+                {
+                    return true;
+                }
+                if holds_spec(group.stream()) {
+                    return true;
+                }
+                after_pound = false;
+            }
+            TokenTree::Ident(_) | TokenTree::Literal(_) => after_pound = false,
+        }
+    }
+    false
+}
+
 #[proc_macro]
 pub fn try_call(args: TokenStream) -> TokenStream {
     if !CONFIG.emits_try_fn() {
@@ -130,4 +210,84 @@ pub fn Spec(_: TokenStream) -> TokenStream {
     )
     .to_compile_error()
     .into()
+}
+
+#[cfg(test)]
+mod tests {
+    use anodized_core::annotate::Specified as _;
+    use quote::quote;
+
+    use super::{CONFIG, SpecFields, holds_spec, verbatim_fn};
+
+    /// The expansion of `item` under `spec`, with its body verbatim or
+    /// parsed whole.
+    fn expand(
+        spec: &proc_macro2::TokenStream,
+        item: &proc_macro2::TokenStream,
+        verbatim: bool,
+    ) -> String {
+        let fields: SpecFields = syn::parse2(spec.clone()).unwrap();
+        let func = if verbatim {
+            verbatim_fn(item).expect("a plain function keeps its body verbatim")
+        } else {
+            syn::parse2::<syn::ItemFn>(item.clone()).unwrap()
+        };
+        let mut func = func;
+        let spec = func.parse_spec_from_fields(fields).unwrap();
+        CONFIG.instrument_item_fn(spec, func).unwrap().to_string()
+    }
+
+    #[test]
+    fn a_verbatim_body_expands_as_the_parsed_body() {
+        let cases = [
+            (
+                quote! { requires: x > 0, captures: old = x, ensures: |out| *out >= old },
+                quote! {
+                    #[inline]
+                    pub fn f(x: u32) -> u32 {
+                        if x > 3 { return x; }
+                        let y = x + 1;
+                        y
+                    }
+                },
+            ),
+            (
+                quote! { ensures: self.n > 0 },
+                quote! {
+                    fn g<T: Clone, const N: usize>(&mut self, items: [T; N]) where T: Default {
+                        for item in items { let _ = item.clone(); }
+                        self.n += 1;
+                    }
+                },
+            ),
+            (
+                quote! { requires: x.is_finite() },
+                quote! { async fn h(x: f32) -> f32 { x / 2.0 } },
+            ),
+        ];
+        for (spec, item) in &cases {
+            assert_eq!(expand(spec, item, true), expand(spec, item, false));
+        }
+    }
+
+    #[test]
+    fn a_const_fn_a_loop_spec_or_no_body_takes_the_whole_parse() {
+        assert!(verbatim_fn(&quote! { const fn f() -> u32 { 1 } }).is_none());
+        assert!(verbatim_fn(&quote! { pub const unsafe fn f() {} }).is_none());
+        assert!(
+            verbatim_fn(&quote! { fn f() { #[spec(maintains: true)] while false {} } }).is_none()
+        );
+        assert!(verbatim_fn(&quote! { fn f(&self); }).is_none());
+        assert!(verbatim_fn(&quote! { pub fn f<const N: usize>() -> usize { N } }).is_some());
+    }
+
+    #[test]
+    fn a_spec_attribute_is_found_at_any_depth() {
+        assert!(holds_spec(
+            quote! { { if c { #[spec(maintains: true)] loop {} } } }
+        ));
+        assert!(!holds_spec(quote! { #[inline] let x = [spec]; }));
+        assert!(!holds_spec(quote! { /// spec
+        let spec = 1; }));
+    }
 }
