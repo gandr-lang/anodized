@@ -5,7 +5,7 @@ mod fns_tests;
 #[path = "const_fns.rs"]
 mod const_fns;
 
-use quote::ToTokens;
+use quote::{ToTokens, quote};
 use syn::{
     Attribute, Block, Expr, FnArg, Ident, Meta, Pat, Path, ReturnType, Signature, Stmt, Token,
     Type,
@@ -287,16 +287,18 @@ impl CheckSettings {
         });
 
         // Generate the binding for captures and the return value.
+        // The body stays as its tokens: no parse of it follows, so the
+        // evaluation and its binding are written as verbatim tokens.
         let return_type = &sig.output;
-        let output_eval: Expr = if sig.asyncness.is_some() {
-            parse_quote! {
+        let output_eval = Expr::Verbatim(if sig.asyncness.is_some() {
+            quote! {
                 ::anodized::__::eval_once(async || #return_type #body).await
             }
         } else {
-            parse_quote! {
+            quote! {
                 ::anodized::__::eval_once(|| #return_type #body)
             }
-        };
+        });
         let capture_reads = emit_captures_and_output_binding(
             inputs.clone(),
             &spec.captures,
@@ -533,11 +535,14 @@ fn emit_captures_and_output_binding<'a, 'b>(
         values.push(*inv_expr.clone());
     }
 
-    let binding = if patterns.len() > 1 {
-        parse_quote! { let (#(#patterns,)*) = (#(#values,)*); }
-    } else {
-        parse_quote! { let #(#patterns)* = #(#values)*; }
-    };
+    let binding = Stmt::Expr(
+        Expr::Verbatim(if patterns.len() > 1 {
+            quote! { let (#(#patterns,)*) = (#(#values,)*); }
+        } else {
+            quote! { let #(#patterns)* = #(#values)*; }
+        }),
+        None,
+    );
 
     statements.push(binding);
     capture_reads
